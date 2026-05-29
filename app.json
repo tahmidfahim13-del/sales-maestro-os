@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "SalesMaestroOS",
+    "slug": "sales-maestro-os",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.salesmaestro.os",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "SalesMaestroOS uses your microphone for voice-based check-ins and roleplay sessions.",
+        "NSSpeechRecognitionUsageDescription": "SalesMaestroOS uses speech recognition to capture your voice input."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "package": "com.salesmaestro.os",
+      "permissions": [
+        "RECORD_AUDIO",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "USE_EXACT_ALARM",
+        "SCHEDULE_EXACT_ALARM"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2196F3",
+          "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow SalesMaestroOS to access your microphone for voice input."
+        }
+      ]
+    ],
+    "scheme": "salesmaestro",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
