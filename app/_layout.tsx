@@ -2,6 +2,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
+import * as Linking from 'expo-linking';
+import * as Font from 'expo-font';
 import { COLORS } from '../constants/theme';
 
 export default function RootLayout() {

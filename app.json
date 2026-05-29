@@ -32,7 +32,16 @@
         "VIBRATE",
         "USE_EXACT_ALARM",
         "SCHEDULE_EXACT_ALARM"
-      ]
+      ],
+      "gradleProperties": {
+        "android.useAndroidX": "true",
+        "android.enableJetifier": "true",
+        "org.gradle.jvmargs": "-Xmx4096m -XX:MaxMetaspaceSize=1024m",
+        "org.gradle.daemon": "true",
+        "org.gradle.parallel": "true",
+        "org.gradle.configureondemand": "true",
+        "kotlin.incremental": "true"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
