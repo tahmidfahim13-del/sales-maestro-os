@@ -1,212 +1,149 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEYS = {
-  API_KEY: 'sm_api_key',
-  START_DATE: 'sm_start_date',
-  DAILY_LOGS: 'sm_daily_logs',
-  ROLEPLAY_HISTORY: 'sm_roleplay_history',
-  WEEKLY_REVIEWS: 'sm_weekly_reviews',
-  SETTINGS: 'sm_settings',
-  STREAK: 'sm_streak',
+const K = {
+  API_KEY:   'sm_api_key',
+  START:     'sm_start_date',
+  LOGS:      'sm_logs',
+  SETTINGS:  'sm_settings',
+  STREAK:    'sm_streak',
   LAST_OPEN: 'sm_last_open',
+  WEEKLY:    'sm_weekly',
+  ROLEPLAY:  'sm_roleplay',
 };
 
-export type DayTier = 'full' | 'half' | 'survival';
+export type Tier = 'full' | 'half' | 'survival';
 
-export interface DailyLog {
-  date: string;
-  day: number;
-  tier: DayTier | null;
-  morningDone: boolean;
-  eveningDone: boolean;
-  roleplayDone: boolean;
-  coursaraDone: boolean;
-  morningCommitment: string;
-  eveningReport: string;
-  claudeEvaluation: string;
-}
-
-export interface RoleplaySession {
-  id: string;
-  date: string;
-  persona: string;
-  difficulty: number;
-  messages: { role: 'user' | 'assistant'; content: string }[];
-  debrief: string;
-  scores: {
-    articulation: number;
-    confidence: number;
-    pressure: number;
-    strategy: number;
-  };
+export interface DayLog {
+  date: string; day: number; tier: Tier | null;
+  morningDone: boolean; eveningDone: boolean; roleplayDone: boolean;
+  morningText: string; eveningText: string; claudeResponse: string;
 }
 
 export interface Settings {
-  morningNotifHour: number;
-  morningNotifMinute: number;
-  eveningNotifHour: number;
-  eveningNotifMinute: number;
-  notificationsEnabled: boolean;
-}
-
-export interface WeeklyReview {
-  week: number;
-  date: string;
-  userReflection: string;
-  claudeEvaluation: string;
-  identityStatement: string;
+  morningHour: number; morningMin: number;
+  eveningHour: number; eveningMin: number;
+  notifsEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  morningNotifHour: 6,
-  morningNotifMinute: 0,
-  eveningNotifHour: 21,
-  eveningNotifMinute: 0,
-  notificationsEnabled: true,
+  morningHour: 6, morningMin: 0,
+  eveningHour: 21, eveningMin: 0,
+  notifsEnabled: true,
 };
 
-export async function saveApiKey(key: string): Promise<void> {
-  await AsyncStorage.setItem(KEYS.API_KEY, key);
-}
+// ── API key ────────────────────────────────────────────────────────────────
+export const saveApiKey = (k: string) => AsyncStorage.setItem(K.API_KEY, k);
+export const getApiKey  = ()          => AsyncStorage.getItem(K.API_KEY);
 
-export async function getApiKey(): Promise<string | null> {
-  return AsyncStorage.getItem(KEYS.API_KEY);
-}
-
-export async function getStartDate(): Promise<string | null> {
-  return AsyncStorage.getItem(KEYS.START_DATE);
-}
-
-export async function setStartDate(date: string): Promise<void> {
-  await AsyncStorage.setItem(KEYS.START_DATE, date);
-}
+// ── Start date / day ───────────────────────────────────────────────────────
+export const getStartDate = () => AsyncStorage.getItem(K.START);
+export const setStartDate = (d: string) => AsyncStorage.setItem(K.START, d);
 
 export async function getCurrentDay(): Promise<number> {
-  const startDate = await getStartDate();
-  if (!startDate) return 1;
-  const start = new Date(startDate);
-  const now = new Date();
-  const diff = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  const s = await getStartDate();
+  if (!s) return 1;
+  const diff = Math.floor((Date.now() - new Date(s).getTime()) / 86_400_000);
   return Math.min(Math.max(diff + 1, 1), 28);
 }
 
-export function getCurrentWeek(day: number): number {
-  return Math.ceil(day / 7);
+export const weekOf = (day: number) => Math.min(Math.ceil(day / 7), 4);
+
+// ── Daily logs ─────────────────────────────────────────────────────────────
+export async function getLogs(): Promise<DayLog[]> {
+  const r = await AsyncStorage.getItem(K.LOGS);
+  return r ? JSON.parse(r) : [];
 }
 
-export async function getDailyLogs(): Promise<DailyLog[]> {
-  const raw = await AsyncStorage.getItem(KEYS.DAILY_LOGS);
-  return raw ? JSON.parse(raw) : [];
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+
+export async function getTodayLog(): Promise<DayLog | null> {
+  const logs = await getLogs();
+  return logs.find(l => l.date === todayStr()) ?? null;
 }
 
-export async function getTodayLog(): Promise<DailyLog | null> {
-  const today = new Date().toISOString().split('T')[0];
-  const logs = await getDailyLogs();
-  return logs.find((l) => l.date === today) || null;
-}
-
-export async function saveDailyLog(log: Partial<DailyLog>): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  const logs = await getDailyLogs();
-  const idx = logs.findIndex((l) => l.date === today);
-  const day = await getCurrentDay();
-  const existing = idx >= 0 ? logs[idx] : {
-    date: today,
-    day,
-    tier: null,
-    morningDone: false,
-    eveningDone: false,
-    roleplayDone: false,
-    coursaraDone: false,
-    morningCommitment: '',
-    eveningReport: '',
-    claudeEvaluation: '',
+export async function saveLog(patch: Partial<DayLog>): Promise<void> {
+  const logs = await getLogs();
+  const today = todayStr();
+  const idx   = logs.findIndex(l => l.date === today);
+  const day   = await getCurrentDay();
+  const base: DayLog = idx >= 0 ? logs[idx] : {
+    date: today, day, tier: null,
+    morningDone: false, eveningDone: false, roleplayDone: false,
+    morningText: '', eveningText: '', claudeResponse: '',
   };
-  const updated = { ...existing, ...log };
-  if (idx >= 0) {
-    logs[idx] = updated;
-  } else {
-    logs.push(updated);
-  }
-  await AsyncStorage.setItem(KEYS.DAILY_LOGS, JSON.stringify(logs));
+  const updated = { ...base, ...patch };
+  if (idx >= 0) logs[idx] = updated; else logs.push(updated);
+  await AsyncStorage.setItem(K.LOGS, JSON.stringify(logs));
 }
 
-export async function getLastSevenLogs(): Promise<DailyLog[]> {
-  const logs = await getDailyLogs();
+export async function getLast7(): Promise<DayLog[]> {
+  const logs = await getLogs();
   return logs.slice(-7);
 }
 
-export async function saveRoleplaySession(session: RoleplaySession): Promise<void> {
-  const raw = await AsyncStorage.getItem(KEYS.ROLEPLAY_HISTORY);
-  const history: RoleplaySession[] = raw ? JSON.parse(raw) : [];
-  history.push(session);
-  await AsyncStorage.setItem(KEYS.ROLEPLAY_HISTORY, JSON.stringify(history));
-}
-
-export async function getRoleplaySessions(): Promise<RoleplaySession[]> {
-  const raw = await AsyncStorage.getItem(KEYS.ROLEPLAY_HISTORY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-export async function saveWeeklyReview(review: WeeklyReview): Promise<void> {
-  const raw = await AsyncStorage.getItem(KEYS.WEEKLY_REVIEWS);
-  const reviews: WeeklyReview[] = raw ? JSON.parse(raw) : [];
-  const idx = reviews.findIndex((r) => r.week === review.week);
-  if (idx >= 0) reviews[idx] = review;
-  else reviews.push(review);
-  await AsyncStorage.setItem(KEYS.WEEKLY_REVIEWS, JSON.stringify(reviews));
-}
-
-export async function getWeeklyReviews(): Promise<WeeklyReview[]> {
-  const raw = await AsyncStorage.getItem(KEYS.WEEKLY_REVIEWS);
-  return raw ? JSON.parse(raw) : [];
-}
-
+// ── Settings ───────────────────────────────────────────────────────────────
 export async function getSettings(): Promise<Settings> {
-  const raw = await AsyncStorage.getItem(KEYS.SETTINGS);
-  return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS;
+  const r = await AsyncStorage.getItem(K.SETTINGS);
+  return r ? { ...DEFAULT_SETTINGS, ...JSON.parse(r) } : DEFAULT_SETTINGS;
+}
+export async function saveSettings(p: Partial<Settings>) {
+  const s = await getSettings();
+  await AsyncStorage.setItem(K.SETTINGS, JSON.stringify({ ...s, ...p }));
 }
 
-export async function saveSettings(settings: Partial<Settings>): Promise<void> {
-  const current = await getSettings();
-  await AsyncStorage.setItem(KEYS.SETTINGS, JSON.stringify({ ...current, ...settings }));
-}
-
-export async function getStreak(): Promise<number> {
-  const raw = await AsyncStorage.getItem(KEYS.STREAK);
-  return raw ? parseInt(raw, 10) : 0;
-}
-
+// ── Streak ─────────────────────────────────────────────────────────────────
 export async function updateStreak(): Promise<number> {
-  const logs = await getDailyLogs();
-  if (!logs.length) return 0;
-  let streak = 0;
-  const sortedLogs = [...logs].sort((a, b) => b.date.localeCompare(a.date));
-  const today = new Date().toISOString().split('T')[0];
-  for (let i = 0; i < sortedLogs.length; i++) {
+  const logs  = await getLogs();
+  const today = todayStr();
+  let streak  = 0;
+  for (let i = 0; i < 28; i++) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
-    const log = sortedLogs.find((l) => l.date === dateStr);
-    if (log && (log.morningDone || log.eveningDone)) streak++;
+    const l = logs.find(x => x.date === d.toISOString().split('T')[0]);
+    if (l && (l.morningDone || l.eveningDone)) streak++;
     else break;
   }
-  await AsyncStorage.setItem(KEYS.STREAK, String(streak));
+  await AsyncStorage.setItem(K.STREAK, String(streak));
   return streak;
 }
 
-export async function getLastOpenDate(): Promise<string | null> {
-  return AsyncStorage.getItem(KEYS.LAST_OPEN);
+// ── Last open ──────────────────────────────────────────────────────────────
+export const setLastOpen = () => AsyncStorage.setItem(K.LAST_OPEN, todayStr());
+export async function daysSinceLastOpen(): Promise<number> {
+  const l = await AsyncStorage.getItem(K.LAST_OPEN);
+  if (!l) return 0;
+  return Math.floor((Date.now() - new Date(l).getTime()) / 86_400_000);
 }
 
-export async function setLastOpenDate(): Promise<void> {
-  await AsyncStorage.setItem(KEYS.LAST_OPEN, new Date().toISOString().split('T')[0]);
+// ── Weekly reviews ─────────────────────────────────────────────────────────
+export interface WeeklyReview {
+  week: number; reflection: string; evaluation: string; identity: string;
+}
+export async function saveWeekly(r: WeeklyReview) {
+  const raw = await AsyncStorage.getItem(K.WEEKLY);
+  const all: WeeklyReview[] = raw ? JSON.parse(raw) : [];
+  const idx = all.findIndex(x => x.week === r.week);
+  if (idx >= 0) all[idx] = r; else all.push(r);
+  await AsyncStorage.setItem(K.WEEKLY, JSON.stringify(all));
+}
+export async function getWeeklies(): Promise<WeeklyReview[]> {
+  const r = await AsyncStorage.getItem(K.WEEKLY);
+  return r ? JSON.parse(r) : [];
 }
 
-export async function getDaysSinceLastOpen(): Promise<number> {
-  const last = await getLastOpenDate();
-  if (!last) return 0;
-  const lastDate = new Date(last);
-  const now = new Date();
-  return Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+// ── Roleplay sessions ──────────────────────────────────────────────────────
+export interface RoleplaySession {
+  id: string; date: string; persona: string; difficulty: number;
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  debrief: string;
+  scores: { articulation: number; confidence: number; pressure: number; strategy: number };
 }
+export async function saveRoleplay(s: RoleplaySession) {
+  const raw = await AsyncStorage.getItem(K.ROLEPLAY);
+  const all: RoleplaySession[] = raw ? JSON.parse(raw) : [];
+  all.push(s);
+  await AsyncStorage.setItem(K.ROLEPLAY, JSON.stringify(all));
+}
+
+// ── Reset ──────────────────────────────────────────────────────────────────
+export const resetAll = () => AsyncStorage.clear();

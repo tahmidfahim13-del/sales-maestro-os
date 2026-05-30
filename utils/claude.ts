@@ -1,70 +1,52 @@
 import { getApiKey } from './storage';
 
-const MODEL = 'claude-sonnet-4-20250514';
-const MAX_TOKENS = 1024;
-const API_URL = 'https://api.anthropic.com/v1/messages';
+const ENDPOINT = 'https://api.anthropic.com/v1/messages';
+const MODEL    = 'claude-sonnet-4-20250514';
 
-export interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
+export interface Msg { role: 'user' | 'assistant'; content: string; }
 
-export async function callClaude(
-  systemPrompt: string,
-  messages: Message[],
-): Promise<string> {
-  const apiKey = await getApiKey();
-  if (!apiKey) throw new Error('No API key set. Please add your Anthropic API key in settings.');
+export async function askClaude(system: string, messages: Msg[]): Promise<string> {
+  const key = await getApiKey();
+  if (!key) throw new Error('No API key — open Settings and add your Anthropic key.');
 
-  const response = await fetch(API_URL, {
+  const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': key,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      messages,
-    }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, messages }),
   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error((err as any)?.error?.message || `API error ${response.status}`);
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error((e as any)?.error?.message ?? `API error ${res.status}`);
   }
-
-  const data = await response.json();
+  const data = await res.json();
   return data.content[0].text as string;
 }
 
-export function buildMorningPrompt(day: number): string {
-  return `You are a direct, no-nonsense accountability partner. The user is on Day ${day} of a 28-day transformation to become an AI-educated B2B Sales Maestro. They have a history of starting strong and quitting. Be direct, not soft. Ask one sharp follow-up question. Max 3 sentences.`;
-}
+// ── System prompts ─────────────────────────────────────────────────────────
+export const PROMPTS = {
+  morning: (day: number) =>
+    `You are a direct, no-nonsense accountability partner. The user is on Day ${day}/28 of a 28-day transformation to become an AI-educated B2B Sales Maestro. They have a history of starting strong and quitting. Be direct, not soft. Ask one sharp follow-up question. Max 3 sentences.`,
 
-export function buildEveningPrompt(day: number, commitment: string, lastSevenSummary: string): string {
-  return `You are an honest mirror. The user is on Day ${day} of 28. They committed to: "${commitment}" this morning. You have context from their last 7 days: ${lastSevenSummary || 'No prior data yet.'}. Evaluate honestly — are they executing or rationalizing? Check for patterns. Be direct. Max 4 sentences.`;
-}
+  evening: (day: number, commitment: string, history: string) =>
+    `You are an honest mirror. Day ${day}/28. User committed to: "${commitment}". Last 7 days: ${history || 'no data yet'}. Evaluate honestly — executing or rationalizing? Identify patterns if they exist. Be direct. Max 4 sentences.`,
 
-export function buildBrainDumpPrompt(): string {
-  return `Sort this brain dump into NOW (must do today), LATER (can wait), TRASH (unnecessary or out of control). For each NOW item, give one specific actionable next step. Be ruthless about what goes in TRASH. Respond ONLY with valid JSON in this exact format: {"now": [{"item": "...", "action": "..."}], "later": ["..."], "trash": ["..."]}`;
-}
+  brainDump: () =>
+    `Sort this brain dump into NOW (must do today), LATER (can wait), TRASH (out of control or unnecessary). For each NOW item give one specific actionable next step. Be ruthless about TRASH. Respond ONLY with valid JSON in this exact shape: {"now":[{"item":"...","action":"..."}],"later":["..."],"trash":["..."]}`,
 
-export function buildRoleplayPrompt(persona: string, difficulty: number, scenario: string): string {
-  return `You are playing ${persona}. Stay in character at all times. Difficulty: ${difficulty}/5. Be realistic and challenging. Do not break character until the user says "end session". Scenario: ${scenario}. Respond as this character would — push back, question assumptions, be demanding. Keep each response to 2-4 sentences.`;
-}
+  roleplay: (persona: string, difficulty: number, scenario: string) =>
+    `You are playing ${persona}. Stay in character at all times. Difficulty: ${difficulty}/5. Scenario: ${scenario}. Be realistic and challenging. Do not break character until the user says "end session". Keep each response to 2–4 sentences.`,
 
-export function buildDebriefPrompt(persona: string, messages: Message[]): string {
-  const transcript = messages.map((m) => `${m.role === 'user' ? 'Salesperson' : persona}: ${m.content}`).join('\n');
-  return `You just completed a roleplay as ${persona}. Now break character completely and analyze the salesperson's performance. Transcript:\n${transcript}\n\nEvaluate: articulation (1-5), confidence (1-5), pressure handling (1-5), strategic thinking (1-5). Give a brief honest assessment. Respond as JSON: {"articulation": N, "confidence": N, "pressure": N, "strategy": N, "summary": "..."}`;
-}
+  debrief: (persona: string, transcript: string) =>
+    `You just completed a roleplay as ${persona}. Break character and analyze the salesperson's performance.\n\nTranscript:\n${transcript}\n\nScore each dimension 1–5. Respond ONLY with valid JSON: {"articulation":N,"confidence":N,"pressure":N,"strategy":N,"summary":"2–3 sentence honest assessment"}`,
 
-export function buildWeeklyPrompt(weekNumber: number, weekData: string): string {
-  return `You are reviewing this person's Week ${weekNumber} data from their 28-day B2B Sales Maestro transformation: ${weekData}. Be an honest mirror. What patterns do you see? What are they avoiding? What is actually working? Max 6 sentences. End with their Week ${weekNumber} identity statement — one bold declarative sentence starting with "I am..."`;
-}
+  weekly: (week: number, data: string) =>
+    `Review this person's Week ${week} of their 28-day B2B Sales Maestro program. Data: ${data}. Be an honest mirror — what patterns do you see? What are they avoiding? What is actually working? Max 6 sentences. End with a bold identity statement starting with "I am..."`,
 
-export function buildDailyQuotePrompt(day: number, week: number, weekTheme: string): string {
-  return `Generate one sharp, direct motivational line for a B2B sales professional on Day ${day} of 28, Week ${week} theme: "${weekTheme}". No fluff. One sentence. No quotes around it.`;
-}
+  quote: (day: number, theme: string) =>
+    `One sharp motivational line for a B2B sales professional on Day ${day}/28, week theme: "${theme}". No fluff. One sentence only. No surrounding quotes.`,
+};

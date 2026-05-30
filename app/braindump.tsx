@@ -1,167 +1,126 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import MicButton from '../components/MicButton';
-import TranscriptBox from '../components/TranscriptBox';
-import { useVoice } from '../hooks/useVoice';
-import { callClaude, buildBrainDumpPrompt } from '../utils/claude';
-import { getCurrentWeek, getCurrentDay } from '../utils/storage';
-import { COLORS, WEEK_THEMES } from '../constants/theme';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import * as Speech from 'expo-speech';
+import VoiceInput from '../components/VoiceInput';
+import { C } from '../constants/theme';
+import { getCurrentDay, weekOf } from '../utils/storage';
+import { askClaude, PROMPTS } from '../utils/claude';
 
-interface BrainDumpResult {
-  now: { item: string; action: string }[];
+interface Dump {
+  now:   { item: string; action: string }[];
   later: string[];
   trash: string[];
 }
 
-export default function BrainDumpScreen() {
-  const router = useRouter();
-  const { isRecording, transcript, setTranscript, startRecording, stopRecording, speak } = useVoice();
+export default function BrainDump() {
+  const [accent,   setAccent]   = useState(C.week[0]);
+  const [text,     setText]     = useState('');
   const [thinking, setThinking] = useState(false);
-  const [result, setResult] = useState<BrainDumpResult | null>(null);
-  const [accentColor, setAccentColor] = useState(COLORS.week1);
-  const [inputText, setInputText] = useState('');
+  const [result,   setResult]   = useState<Dump | null>(null);
 
   useEffect(() => {
-    async function load() {
-      const d = await getCurrentDay();
-      const w = getCurrentWeek(d);
-      setAccentColor(WEEK_THEMES[w - 1]?.color || COLORS.week1);
-    }
-    load();
+    getCurrentDay().then(d => setAccent(C.week[weekOf(d) - 1]));
   }, []);
 
-  async function handleMic() {
-    if (isRecording) {
-      await stopRecording();
-      if (inputText || transcript) await submit(inputText || transcript);
-    } else {
-      const ok = await startRecording();
-      if (!ok) Alert.alert('Permission denied', 'Microphone access is required.');
-    }
-  }
-
-  async function submit(dump: string) {
-    if (!dump.trim()) return;
+  async function submit() {
+    if (!text.trim()) return;
     setThinking(true);
     try {
-      const prompt = buildBrainDumpPrompt();
-      const res = await callClaude(prompt, [{ role: 'user', content: dump }]);
-      const cleaned = res.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const parsed: BrainDumpResult = JSON.parse(cleaned);
-      setResult(parsed);
-      const summary = `You have ${parsed.now.length} NOW items, ${parsed.later.length} LATER, and ${parsed.trash.length} in trash.`;
-      speak(summary);
+      const raw   = await askClaude(PROMPTS.brainDump(), [{ role: 'user', content: text }]);
+      const clean = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const d: Dump = JSON.parse(clean);
+      setResult(d);
+      Speech.speak(
+        `${d.now.length} now, ${d.later.length} later, ${d.trash.length} in trash.`,
+        { rate: 0.95 },
+      );
     } catch (e: any) {
-      Alert.alert('Error', 'Could not parse response. ' + e.message);
+      Alert.alert('Parse error', e.message);
     } finally {
       setThinking(false);
     }
   }
 
-  useEffect(() => {
-    if (transcript) setInputText(transcript);
-  }, [transcript]);
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Text style={[styles.title, { color: accentColor }]}>BRAIN DUMP</Text>
-      <Text style={styles.sub}>Speak everything on your mind. Claude will sort it.</Text>
+    <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <Text style={[s.title, { color: accent }]}>BRAIN DUMP</Text>
+      <Text style={s.sub}>Say everything. Claude sorts it ruthlessly.</Text>
 
-      <TranscriptBox
-        transcript={inputText}
-        placeholder="Say everything — tasks, worries, ideas, distractions. All of it."
+      <VoiceInput
+        value={text}
+        onChange={setText}
+        placeholder="Tasks, worries, ideas, distractions — everything."
+        disabled={thinking || !!result}
       />
 
-      <View style={styles.micArea}>
-        <MicButton isRecording={isRecording} onPress={handleMic} disabled={thinking} />
-        <Text style={styles.micLabel}>
-          {isRecording ? 'Listening... tap to sort' : thinking ? 'Sorting...' : 'Tap to speak'}
-        </Text>
-      </View>
-
-      {thinking && (
-        <Text style={[styles.thinkingLabel, { color: accentColor }]}>Sorting your mind...</Text>
+      {!result && (
+        <TouchableOpacity
+          style={[s.btn, { backgroundColor: accent }, !text.trim() && s.off]}
+          onPress={submit}
+          disabled={!text.trim() || thinking}
+        >
+          <Text style={s.btnText}>{thinking ? 'SORTING…' : 'SORT MY MIND'}</Text>
+        </TouchableOpacity>
       )}
 
       {result && (
-        <View style={styles.results}>
-          <Text style={styles.sectionHead}>NOW</Text>
-          {result.now.map((item, i) => (
-            <View key={i} style={[styles.card, { borderLeftColor: COLORS.micActive }]}>
-              <Text style={styles.cardItem}>{item.item}</Text>
-              <Text style={styles.cardAction}>→ {item.action}</Text>
-            </View>
-          ))}
-          {result.now.length === 0 && <Text style={styles.empty}>Nothing urgent. Good.</Text>}
+        <>
+          {/* NOW */}
+          <Text style={[s.secHead, { color: C.red }]}>NOW</Text>
+          {result.now.length === 0
+            ? <Text style={s.empty}>Nothing urgent.</Text>
+            : result.now.map((item, i) => (
+              <View key={i} style={[s.card, { borderLeftColor: C.red }]}>
+                <Text style={s.cardItem}>{item.item}</Text>
+                <Text style={s.cardAction}>→ {item.action}</Text>
+              </View>
+            ))}
 
-          <Text style={[styles.sectionHead, { marginTop: 20 }]}>LATER</Text>
-          {result.later.map((item, i) => (
-            <View key={i} style={[styles.card, { borderLeftColor: accentColor }]}>
-              <Text style={styles.cardItem}>{item}</Text>
-            </View>
-          ))}
-          {result.later.length === 0 && <Text style={styles.empty}>No deferred items.</Text>}
+          {/* LATER */}
+          <Text style={[s.secHead, { color: accent }]}>LATER</Text>
+          {result.later.length === 0
+            ? <Text style={s.empty}>Nothing deferred.</Text>
+            : result.later.map((item, i) => (
+              <View key={i} style={[s.card, { borderLeftColor: accent }]}>
+                <Text style={s.cardItem}>{item}</Text>
+              </View>
+            ))}
 
-          <Text style={[styles.sectionHead, { marginTop: 20 }]}>TRASH</Text>
-          {result.trash.map((item, i) => (
-            <View key={i} style={[styles.card, { borderLeftColor: COLORS.mutedText, opacity: 0.6 }]}>
-              <Text style={[styles.cardItem, { textDecorationLine: 'line-through', color: COLORS.secondaryText }]}>{item}</Text>
-            </View>
-          ))}
-          {result.trash.length === 0 && <Text style={styles.empty}>Nothing to trash.</Text>}
+          {/* TRASH */}
+          <Text style={[s.secHead, { color: C.dim }]}>TRASH</Text>
+          {result.trash.length === 0
+            ? <Text style={s.empty}>Nothing to discard.</Text>
+            : result.trash.map((item, i) => (
+              <View key={i} style={[s.card, { borderLeftColor: C.dim, opacity: 0.55 }]}>
+                <Text style={[s.cardItem, { textDecorationLine: 'line-through', color: C.muted }]}>{item}</Text>
+              </View>
+            ))}
 
           <TouchableOpacity
-            style={[styles.resetBtn, { borderColor: accentColor }]}
-            onPress={() => { setResult(null); setInputText(''); setTranscript(''); }}
+            style={[s.resetBtn, { borderColor: accent }]}
+            onPress={() => { setResult(null); setText(''); }}
           >
-            <Text style={[styles.resetBtnText, { color: accentColor }]}>NEW DUMP</Text>
+            <Text style={[s.resetText, { color: accent }]}>NEW DUMP</Text>
           </TouchableOpacity>
-        </View>
+        </>
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 24, paddingTop: 16, paddingBottom: 60 },
-  title: { fontFamily: 'monospace', fontSize: 22, fontWeight: '900', letterSpacing: 3, marginBottom: 8 },
-  sub: { color: COLORS.secondaryText, fontSize: 14, marginBottom: 20 },
-  micArea: { alignItems: 'center', marginVertical: 32 },
-  micLabel: { color: COLORS.secondaryText, fontSize: 13, marginTop: 12 },
-  thinkingLabel: { textAlign: 'center', fontFamily: 'monospace', fontSize: 13, letterSpacing: 2 },
-  results: { marginTop: 16 },
-  sectionHead: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    letterSpacing: 3,
-    color: COLORS.secondaryText,
-    marginBottom: 10,
-  },
-  card: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    borderLeftWidth: 3,
-    padding: 14,
-    marginBottom: 8,
-  },
-  cardItem: { color: COLORS.primaryText, fontSize: 15, fontWeight: '600' },
-  cardAction: { color: COLORS.secondaryText, fontSize: 13, marginTop: 4 },
-  empty: { color: COLORS.mutedText, fontSize: 13, fontStyle: 'italic', marginBottom: 8 },
-  resetBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 28,
-  },
-  resetBtnText: { fontFamily: 'monospace', fontWeight: '700', fontSize: 13, letterSpacing: 2 },
+const s = StyleSheet.create({
+  scroll:     { flex: 1, backgroundColor: C.bg },
+  content:    { padding: 24, paddingTop: 16, paddingBottom: 60, gap: 14 },
+  title:      { fontFamily: 'monospace', fontSize: 22, fontWeight: '900', letterSpacing: 3 },
+  sub:        { color: C.muted, fontSize: 14 },
+  btn:        { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  off:        { opacity: 0.4 },
+  btnText:    { color: '#FFF', fontFamily: 'monospace', fontWeight: '800', fontSize: 14, letterSpacing: 2 },
+  secHead:    { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3, marginTop: 8 },
+  card:       { backgroundColor: C.surface, borderRadius: 10, borderLeftWidth: 3, padding: 13 },
+  cardItem:   { color: C.text, fontSize: 14, fontWeight: '600' },
+  cardAction: { color: C.muted, fontSize: 13, marginTop: 4 },
+  empty:      { color: C.dim, fontSize: 13, fontStyle: 'italic' },
+  resetBtn:   { borderRadius: 12, borderWidth: 1, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  resetText:  { fontFamily: 'monospace', fontWeight: '700', fontSize: 13, letterSpacing: 2 },
 });

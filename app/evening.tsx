@@ -1,78 +1,50 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import MicButton from '../components/MicButton';
-import TranscriptBox from '../components/TranscriptBox';
-import ClaudeResponse from '../components/ClaudeResponse';
-import { useVoice } from '../hooks/useVoice';
-import { callClaude, buildEveningPrompt } from '../utils/claude';
-import {
-  getCurrentDay,
-  getCurrentWeek,
-  saveDailyLog,
-  getTodayLog,
-  getLastSevenLogs,
-} from '../utils/storage';
-import { COLORS, WEEK_THEMES } from '../constants/theme';
+import * as Speech from 'expo-speech';
+import VoiceInput from '../components/VoiceInput';
+import ClaudeBox from '../components/ClaudeBox';
+import { C } from '../constants/theme';
+import { getCurrentDay, weekOf, getTodayLog, saveLog, getLast7 } from '../utils/storage';
+import { askClaude, PROMPTS } from '../utils/claude';
 
-export default function EveningScreen() {
+export default function Evening() {
   const router = useRouter();
-  const { isRecording, transcript, setTranscript, startRecording, stopRecording, speak } = useVoice();
-  const [thinking, setThinking] = useState(false);
-  const [response, setResponse] = useState('');
-  const [day, setDay] = useState(1);
-  const [accentColor, setAccentColor] = useState(COLORS.week1);
-  const [done, setDone] = useState(false);
-  const [inputText, setInputText] = useState('');
-  const [commitment, setCommitment] = useState('');
+  const [day,        setDay]       = useState(1);
+  const [accent,     setAccent]    = useState(C.week[0]);
+  const [text,       setText]      = useState('');
+  const [commitment, setCommit]    = useState('');
+  const [thinking,   setThinking]  = useState(false);
+  const [response,   setResponse]  = useState('');
+  const [done,       setDone]      = useState(false);
 
   useEffect(() => {
-    async function load() {
+    (async () => {
       const d = await getCurrentDay();
-      const w = getCurrentWeek(d);
-      setDay(d);
-      setAccentColor(WEEK_THEMES[w - 1]?.color || COLORS.week1);
-      const log = await getTodayLog();
-      if (log?.morningCommitment) setCommitment(log.morningCommitment);
-      if (log?.eveningDone) {
-        setDone(true);
-        setResponse(log.claudeEvaluation || '');
-        setInputText(log.eveningReport || '');
+      setDay(d); setAccent(C.week[weekOf(d) - 1]);
+      const l = await getTodayLog();
+      if (l?.morningText) setCommit(l.morningText);
+      if (l?.eveningDone) {
+        setDone(true); setText(l.eveningText); setResponse(l.claudeResponse);
       }
-    }
-    load();
+    })();
   }, []);
 
-  async function handleMic() {
-    if (isRecording) {
-      await stopRecording();
-      if (inputText || transcript) await submit(inputText || transcript);
-    } else {
-      const ok = await startRecording();
-      if (!ok) Alert.alert('Permission denied', 'Microphone access is required.');
-    }
-  }
-
-  async function submit(report: string) {
-    if (!report.trim()) return;
+  async function submit() {
+    if (!text.trim()) return;
     setThinking(true);
     try {
-      const sevenLogs = await getLastSevenLogs();
-      const summary = sevenLogs
-        .map((l) => `Day ${l.day}: committed to "${l.morningCommitment}", reported "${l.eveningReport}", tier: ${l.tier}`)
-        .join('. ');
-      const prompt = buildEveningPrompt(day, commitment, summary);
-      const res = await callClaude(prompt, [{ role: 'user', content: report }]);
+      const last7 = await getLast7();
+      const history = last7
+        .map(l => `Day ${l.day}: committed="${l.morningText}", reported="${l.eveningText}", tier=${l.tier}`)
+        .join('; ');
+      const res = await askClaude(
+        PROMPTS.evening(day, commitment, history),
+        [{ role: 'user', content: text }],
+      );
       setResponse(res);
-      speak(res);
-      await saveDailyLog({ eveningDone: true, eveningReport: report, claudeEvaluation: res });
+      Speech.speak(res, { rate: 0.95 });
+      await saveLog({ eveningDone: true, eveningText: text, claudeResponse: res });
       setDone(true);
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -81,63 +53,58 @@ export default function EveningScreen() {
     }
   }
 
-  useEffect(() => {
-    if (transcript) setInputText(transcript);
-  }, [transcript]);
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Text style={[styles.dayLine, { color: accentColor }]}>DAY {day} — EVENING AUDIT</Text>
-      <Text style={styles.title}>What actually happened today?</Text>
-      {commitment ? (
-        <View style={styles.commitBanner}>
-          <Text style={styles.commitLabel}>YOU SAID THIS MORNING:</Text>
-          <Text style={styles.commitText}>"{commitment}"</Text>
-        </View>
-      ) : null}
-      <Text style={styles.sub}>Report honestly. No spin. No excuses.</Text>
+    <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <Text style={[s.chip, { color: accent }]}>DAY {day} — EVENING AUDIT</Text>
+      <Text style={s.title}>What actually happened?</Text>
 
-      <TranscriptBox
-        transcript={inputText}
-        placeholder="What did you do? What didn't happen? Be specific and honest."
+      {!!commitment && (
+        <View style={s.banner}>
+          <Text style={s.bannerLbl}>YOU COMMITTED TO:</Text>
+          <Text style={s.bannerText}>"{commitment}"</Text>
+        </View>
+      )}
+
+      <Text style={s.sub}>Report honestly. No spin.</Text>
+
+      <VoiceInput
+        value={text}
+        onChange={setText}
+        placeholder="What did you do? What didn't happen? Be specific."
+        disabled={done}
       />
 
-      <View style={styles.micArea}>
-        <MicButton isRecording={isRecording} onPress={handleMic} disabled={thinking || done} />
-        <Text style={styles.micLabel}>
-          {isRecording ? 'Listening... tap to send' : done ? 'Completed' : 'Tap to speak'}
-        </Text>
-      </View>
+      {!done && (
+        <TouchableOpacity
+          style={[s.btn, { backgroundColor: accent }, !text.trim() && s.off]}
+          onPress={submit}
+          disabled={!text.trim() || thinking}
+        >
+          <Text style={s.btnText}>{thinking ? 'EVALUATING…' : 'SUBMIT REPORT'}</Text>
+        </TouchableOpacity>
+      )}
 
-      <ClaudeResponse response={response} thinking={thinking} accentColor={accentColor} />
+      <ClaudeBox response={response} thinking={thinking} accent={accent} />
 
       {done && (
-        <TouchableOpacity style={[styles.doneBtn, { backgroundColor: accentColor }]} onPress={() => router.back()}>
-          <Text style={styles.doneBtnText}>BACK TO HOME</Text>
+        <TouchableOpacity style={[s.btn, { backgroundColor: accent, marginTop: 24 }]} onPress={() => router.back()}>
+          <Text style={s.btnText}>BACK TO HOME</Text>
         </TouchableOpacity>
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 24, paddingTop: 16, paddingBottom: 60 },
-  dayLine: { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3, marginBottom: 12 },
-  title: { color: COLORS.primaryText, fontSize: 24, fontWeight: '700', lineHeight: 32, marginBottom: 12 },
-  commitBanner: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  commitLabel: { color: COLORS.mutedText, fontSize: 10, fontFamily: 'monospace', letterSpacing: 2, marginBottom: 4 },
-  commitText: { color: COLORS.secondaryText, fontSize: 14, fontStyle: 'italic' },
-  sub: { color: COLORS.secondaryText, fontSize: 14, marginBottom: 20 },
-  micArea: { alignItems: 'center', marginVertical: 32 },
-  micLabel: { color: COLORS.secondaryText, fontSize: 13, marginTop: 12 },
-  doneBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 24 },
-  doneBtnText: { color: '#FFFFFF', fontFamily: 'monospace', fontWeight: '800', fontSize: 14, letterSpacing: 2 },
+const s = StyleSheet.create({
+  scroll:     { flex: 1, backgroundColor: C.bg },
+  content:    { padding: 24, paddingTop: 16, paddingBottom: 60, gap: 14 },
+  chip:       { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3 },
+  title:      { color: C.text, fontSize: 22, fontWeight: '700' },
+  banner:     { backgroundColor: C.surface, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: C.border },
+  bannerLbl:  { color: C.dim, fontSize: 10, fontFamily: 'monospace', letterSpacing: 2, marginBottom: 4 },
+  bannerText: { color: C.muted, fontSize: 14, fontStyle: 'italic' },
+  sub:        { color: C.muted, fontSize: 14 },
+  btn:        { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  off:        { opacity: 0.4 },
+  btnText:    { color: '#FFF', fontFamily: 'monospace', fontWeight: '800', fontSize: 14, letterSpacing: 2 },
 });

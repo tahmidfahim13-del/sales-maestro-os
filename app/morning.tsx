@@ -1,79 +1,44 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import MicButton from '../components/MicButton';
-import TranscriptBox from '../components/TranscriptBox';
-import ClaudeResponse from '../components/ClaudeResponse';
-import { useVoice } from '../hooks/useVoice';
-import { callClaude, buildMorningPrompt } from '../utils/claude';
-import {
-  getCurrentDay,
-  getCurrentWeek,
-  saveDailyLog,
-  getTodayLog,
-} from '../utils/storage';
-import { COLORS, WEEK_THEMES } from '../constants/theme';
+import * as Speech from 'expo-speech';
+import VoiceInput from '../components/VoiceInput';
+import ClaudeBox from '../components/ClaudeBox';
+import { C } from '../constants/theme';
+import { getCurrentDay, weekOf, getTodayLog, saveLog } from '../utils/storage';
+import { askClaude, PROMPTS } from '../utils/claude';
 
-export default function MorningScreen() {
+export default function Morning() {
   const router = useRouter();
-  const { isRecording, transcript, setTranscript, startRecording, stopRecording, speak } = useVoice();
+  const [day,      setDay]      = useState(1);
+  const [accent,   setAccent]   = useState(C.week[0]);
+  const [text,     setText]     = useState('');
   const [thinking, setThinking] = useState(false);
   const [response, setResponse] = useState('');
-  const [day, setDay] = useState(1);
-  const [accentColor, setAccentColor] = useState(COLORS.week1);
-  const [done, setDone] = useState(false);
-  const [inputText, setInputText] = useState('');
+  const [done,     setDone]     = useState(false);
 
   useEffect(() => {
-    async function load() {
+    (async () => {
       const d = await getCurrentDay();
-      const w = getCurrentWeek(d);
-      setDay(d);
-      setAccentColor(WEEK_THEMES[w - 1]?.color || COLORS.week1);
-      const log = await getTodayLog();
-      if (log?.morningDone) {
-        setDone(true);
-        setResponse(log.claudeEvaluation || '');
-        setInputText(log.morningCommitment || '');
+      setDay(d); setAccent(C.week[weekOf(d) - 1]);
+      const l = await getTodayLog();
+      if (l?.morningDone) {
+        setDone(true); setText(l.morningText); setResponse(l.claudeResponse);
       }
-    }
-    load();
+    })();
   }, []);
 
-  async function handleMic() {
-    if (isRecording) {
-      const text = await stopRecording();
-      if (inputText || transcript) {
-        await submit(inputText || transcript);
-      }
-    } else {
-      const ok = await startRecording();
-      if (!ok) Alert.alert('Permission denied', 'Microphone access is required.');
-    }
-  }
-
-  async function submit(commitment: string) {
-    if (!commitment.trim()) return;
+  async function submit() {
+    if (!text.trim()) return;
     setThinking(true);
     try {
-      const prompt = buildMorningPrompt(day);
-      const res = await callClaude(prompt, [
-        { role: 'user', content: commitment },
-      ]);
+      const res = await askClaude(
+        PROMPTS.morning(day),
+        [{ role: 'user', content: text }],
+      );
       setResponse(res);
-      speak(res);
-      await saveDailyLog({
-        morningDone: true,
-        morningCommitment: commitment,
-        claudeEvaluation: res,
-      });
+      Speech.speak(res, { rate: 0.95 });
+      await saveLog({ morningDone: true, morningText: text, claudeResponse: res });
       setDone(true);
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -82,58 +47,47 @@ export default function MorningScreen() {
     }
   }
 
-  useEffect(() => {
-    if (transcript) setInputText(transcript);
-  }, [transcript]);
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Text style={[styles.dayLine, { color: accentColor }]}>DAY {day} — MORNING</Text>
-      <Text style={styles.title}>What is your commitment today?</Text>
-      <Text style={styles.sub}>Speak it out loud. Make it real.</Text>
+    <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <Text style={[s.chip, { color: accent }]}>DAY {day} — MORNING</Text>
+      <Text style={s.title}>What is your commitment today?</Text>
+      <Text style={s.sub}>Be specific. Make it real.</Text>
 
-      <TranscriptBox
-        transcript={inputText}
-        placeholder="Tap the mic. Say what you're going to do today. Be specific."
+      <VoiceInput
+        value={text}
+        onChange={setText}
+        placeholder="I will… (speak or type)"
+        disabled={done}
       />
 
-      <View style={styles.micArea}>
-        <MicButton isRecording={isRecording} onPress={handleMic} disabled={thinking || done} />
-        <Text style={styles.micLabel}>
-          {isRecording ? 'Listening... tap to send' : done ? 'Completed' : 'Tap to speak'}
-        </Text>
-      </View>
+      {!done && (
+        <TouchableOpacity
+          style={[s.btn, { backgroundColor: accent }, !text.trim() && s.off]}
+          onPress={submit}
+          disabled={!text.trim() || thinking}
+        >
+          <Text style={s.btnText}>{thinking ? 'SENDING…' : 'SUBMIT COMMITMENT'}</Text>
+        </TouchableOpacity>
+      )}
 
-      <ClaudeResponse response={response} thinking={thinking} accentColor={accentColor} />
+      <ClaudeBox response={response} thinking={thinking} accent={accent} />
 
       {done && (
-        <TouchableOpacity style={[styles.doneBtn, { backgroundColor: accentColor }]} onPress={() => router.back()}>
-          <Text style={styles.doneBtnText}>BACK TO HOME</Text>
+        <TouchableOpacity style={[s.btn, { backgroundColor: accent, marginTop: 24 }]} onPress={() => router.back()}>
+          <Text style={s.btnText}>BACK TO HOME</Text>
         </TouchableOpacity>
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 24, paddingTop: 16, paddingBottom: 60 },
-  dayLine: { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3, marginBottom: 12 },
-  title: { color: COLORS.primaryText, fontSize: 24, fontWeight: '700', lineHeight: 32, marginBottom: 8 },
-  sub: { color: COLORS.secondaryText, fontSize: 14, marginBottom: 20 },
-  micArea: { alignItems: 'center', marginVertical: 32 },
-  micLabel: { color: COLORS.secondaryText, fontSize: 13, marginTop: 12 },
-  doneBtn: {
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  doneBtnText: {
-    color: '#FFFFFF',
-    fontFamily: 'monospace',
-    fontWeight: '800',
-    fontSize: 14,
-    letterSpacing: 2,
-  },
+const s = StyleSheet.create({
+  scroll:  { flex: 1, backgroundColor: C.bg },
+  content: { padding: 24, paddingTop: 16, paddingBottom: 60, gap: 16 },
+  chip:    { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3 },
+  title:   { color: C.text, fontSize: 22, fontWeight: '700', lineHeight: 30 },
+  sub:     { color: C.muted, fontSize: 14 },
+  btn:     { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  off:     { opacity: 0.4 },
+  btnText: { color: '#FFF', fontFamily: 'monospace', fontWeight: '800', fontSize: 14, letterSpacing: 2 },
 });
